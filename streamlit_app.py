@@ -1,151 +1,912 @@
 import streamlit as st
+import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import numpy as np
+from datetime import datetime
+import io
 
-# Set the title and favicon that appear in the Browser's tab bar.
+# Page configuration
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title="AC Telemetry Pro",
+    page_icon="🏎️",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Custom CSS for modern, sleek design with wine red accents
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap');
+    
+    /* Main theme */
+    :root {
+        --wine-red: #8B1538;
+        --wine-red-light: #A01C3A;
+        --wine-red-dark: #6B0F2A;
+        --wine-red-glow: rgba(139, 21, 56, 0.3);
+        --dark-bg: #0A0A0A;
+        --card-bg: #141414;
+        --border-color: #2A2A2A;
+        --text-primary: #FFFFFF;
+        --text-secondary: #B0B0B0;
+    }
+    
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Main container */
+    .stApp {
+        background: linear-gradient(135deg, #0A0A0A 0%, #1A0A0F 100%);
+        font-family: 'Rajdhani', sans-serif;
+    }
+    
+    /* Headers */
+    h1 {
+        font-family: 'Orbitron', sans-serif;
+        font-weight: 900;
+        color: var(--text-primary);
+        text-transform: uppercase;
+        letter-spacing: 3px;
+        margin-bottom: 0.5rem;
+        text-shadow: 0 0 20px var(--wine-red-glow);
+    }
+    
+    h2, h3 {
+        font-family: 'Orbitron', sans-serif;
+        color: var(--wine-red-light);
+        font-weight: 700;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        margin-top: 2rem;
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, var(--dark-bg) 0%, #1A0A0F 100%);
+        border-right: 2px solid var(--wine-red-dark);
+    }
+    
+    [data-testid="stSidebar"] h1, 
+    [data-testid="stSidebar"] h2, 
+    [data-testid="stSidebar"] h3 {
+        color: var(--wine-red-light);
+    }
+    
+    /* Metrics */
+    [data-testid="stMetricValue"] {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--wine-red-light);
+    }
+    
+    [data-testid="stMetricLabel"] {
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--text-secondary);
+    }
+    
+    /* Cards/Containers */
+    .element-container {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Buttons */
+    .stButton button {
+        background: linear-gradient(135deg, var(--wine-red) 0%, var(--wine-red-dark) 100%);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 0.75rem 2rem;
+        font-family: 'Orbitron', sans-serif;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px var(--wine-red-glow);
+    }
+    
+    .stButton button:hover {
+        background: linear-gradient(135deg, var(--wine-red-light) 0%, var(--wine-red) 100%);
+        box-shadow: 0 6px 20px var(--wine-red-glow);
+        transform: translateY(-2px);
+    }
+    
+    /* File uploader */
+    [data-testid="stFileUploader"] {
+        background: var(--card-bg);
+        border: 2px dashed var(--wine-red-dark);
+        border-radius: 8px;
+        padding: 2rem;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: var(--card-bg);
+        border-radius: 8px;
+        padding: 0.5rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        font-family: 'Orbitron', sans-serif;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-secondary);
+        padding: 0.75rem 1.5rem;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, var(--wine-red) 0%, var(--wine-red-dark) 100%);
+        color: white;
+        border-color: var(--wine-red);
+    }
+    
+    /* Selectbox and inputs */
+    .stSelectbox, .stMultiSelect {
+        font-family: 'Rajdhani', sans-serif;
+    }
+    
+    /* Dataframe */
+    [data-testid="stDataFrame"] {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+    }
+    
+    /* Info boxes */
+    .stAlert {
+        background: var(--card-bg);
+        border-left: 4px solid var(--wine-red);
+        font-family: 'Rajdhani', sans-serif;
+    }
+    
+    /* Custom stat card */
+    .stat-card {
+        background: linear-gradient(135deg, var(--card-bg) 0%, #1A1A1A 100%);
+        border: 1px solid var(--wine-red-dark);
+        border-radius: 8px;
+        padding: 1.5rem;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        transition: all 0.3s ease;
+    }
+    
+    .stat-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 25px var(--wine-red-glow);
+        border-color: var(--wine-red);
+    }
+    
+    .stat-value {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 2.5rem;
+        font-weight: 900;
+        color: var(--wine-red-light);
+        text-shadow: 0 0 10px var(--wine-red-glow);
+    }
+    
+    .stat-label {
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: var(--text-secondary);
+        margin-top: 0.5rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# Plotly theme for wine red accents
+def get_plotly_layout(**kwargs):
+    """Get plotly layout with wine red theme"""
+    layout = {
+        'paper_bgcolor': '#0A0A0A',
+        'plot_bgcolor': '#141414',
+        'font': {'color': '#FFFFFF', 'family': 'Rajdhani'},
+        'xaxis': {
+            'gridcolor': '#2A2A2A',
+            'zerolinecolor': '#2A2A2A',
+            'color': '#B0B0B0'
+        },
+        'yaxis': {
+            'gridcolor': '#2A2A2A',
+            'zerolinecolor': '#2A2A2A',
+            'color': '#B0B0B0'
+        },
+        'colorway': ['#8B1538', '#A01C3A', '#FF6B8A', '#FF9BB5', '#4A90E2', '#50C878']
+    }
+    
+    # Add title styling if title is provided
+    if 'title' in kwargs:
+        layout['title'] = {
+            'text': kwargs['title'],
+            'font': {'family': 'Orbitron', 'size': 20, 'color': '#A01C3A'}
+        }
+        del kwargs['title']
+    
+    # Merge with any additional kwargs
+    layout.update(kwargs)
+    return layout
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# Sample data generator for demo purposes
+def generate_sample_data(num_laps=5):
+    """Generate sample telemetry data for demonstration"""
+    data_frames = []
+    
+    for lap in range(1, num_laps + 1):
+        # Generate distance points
+        distance = np.linspace(0, 5000, 1000)  # 5km track
+        
+        # Generate realistic telemetry
+        base_speed = 180 + np.random.randn() * 10
+        speed = base_speed + 50 * np.sin(distance / 300) + np.random.randn(1000) * 5
+        speed = np.clip(speed, 0, 320)
+        
+        throttle = np.clip((speed - 50) / 200, 0, 1) + np.random.randn(1000) * 0.05
+        throttle = np.clip(throttle, 0, 1)
+        
+        brake = np.zeros(1000)
+        brake_zones = [(200, 300), (800, 900), (1500, 1600), (2200, 2300), (3500, 3600), (4500, 4600)]
+        for start, end in brake_zones:
+            brake[int(start):int(end)] = 0.8 + np.random.randn() * 0.1
+        brake = np.clip(brake, 0, 1)
+        
+        steering = 0.3 * np.sin(distance / 200) + np.random.randn(1000) * 0.1
+        steering = np.clip(steering, -1, 1)
+        
+        # Tire temperatures
+        tire_fl = 80 + 15 * (throttle + brake) + np.random.randn(1000) * 2
+        tire_fr = 80 + 15 * (throttle + brake) + np.random.randn(1000) * 2
+        tire_rl = 75 + 15 * (throttle + brake) + np.random.randn(1000) * 2
+        tire_rr = 75 + 15 * (throttle + brake) + np.random.randn(1000) * 2
+        
+        gear = np.clip(np.floor(speed / 40) + 1, 1, 6).astype(int)
+        
+        # RPM
+        rpm = speed * 50 + gear * 500 + np.random.randn(1000) * 100
+        rpm = np.clip(rpm, 1000, 8500)
+        
+        # Time
+        time = distance / (speed / 3.6)  # Convert km/h to m/s
+        time = np.cumsum(np.diff(np.concatenate([[0], time])))
+        
+        lap_time = time[-1] + np.random.randn() * 2
+        
+        df = pd.DataFrame({
+            'Lap': lap,
+            'Distance': distance,
+            'Time': time,
+            'Speed': speed,
+            'Throttle': throttle,
+            'Brake': brake,
+            'Steering': steering,
+            'Gear': gear,
+            'RPM': rpm,
+            'TireFL': tire_fl,
+            'TireFR': tire_fr,
+            'TireRL': tire_rl,
+            'TireRR': tire_rr,
+            'LapTime': lap_time
+        })
+        
+        data_frames.append(df)
+    
+    return pd.concat(data_frames, ignore_index=True)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
+def load_telemetry_data(uploaded_file):
+    """Load telemetry data from uploaded file"""
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        elif uploaded_file.name.endswith(('.xls', '.xlsx')):
+            df = pd.read_excel(uploaded_file)
         else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+            st.error("Unsupported file format. Please upload CSV or Excel files.")
+            return None
+        
+        # Validate required columns
+        required_cols = ['Lap', 'Distance', 'Speed']
+        if not all(col in df.columns for col in required_cols):
+            st.warning(f"File missing required columns: {required_cols}. Using sample data.")
+            return generate_sample_data()
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading file: {str(e)}")
+        return None
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
+def create_speed_trace(df, selected_laps):
+    """Create speed trace comparison plot"""
+    fig = go.Figure()
+    
+    for lap in selected_laps:
+        lap_data = df[df['Lap'] == lap]
+        fig.add_trace(go.Scatter(
+            x=lap_data['Distance'],
+            y=lap_data['Speed'],
+            name=f'Lap {lap} ({lap_data["LapTime"].iloc[0]:.3f}s)',
+            mode='lines',
+            line=dict(width=2),
+            hovertemplate='Distance: %{x:.0f}m<br>Speed: %{y:.1f} km/h<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        **get_plotly_layout(
+            title='Speed Trace Comparison',
+            xaxis_title='Distance (m)',
+            yaxis_title='Speed (km/h)',
+            hovermode='x unified',
+            height=500
         )
+    )
+    
+    return fig
+
+def create_input_analysis(df, lap):
+    """Create throttle, brake, and steering input analysis"""
+    lap_data = df[df['Lap'] == lap]
+    
+    fig = make_subplots(
+        rows=3, cols=1,
+        subplot_titles=('Throttle Input', 'Brake Input', 'Steering Input'),
+        vertical_spacing=0.1,
+        shared_xaxes=True
+    )
+    
+    # Throttle
+    fig.add_trace(go.Scatter(
+        x=lap_data['Distance'],
+        y=lap_data['Throttle'] * 100,
+        name='Throttle',
+        fill='tozeroy',
+        line=dict(color='#50C878', width=2),
+        hovertemplate='Distance: %{x:.0f}m<br>Throttle: %{y:.1f}%<extra></extra>'
+    ), row=1, col=1)
+    
+    # Brake
+    fig.add_trace(go.Scatter(
+        x=lap_data['Distance'],
+        y=lap_data['Brake'] * 100,
+        name='Brake',
+        fill='tozeroy',
+        line=dict(color='#8B1538', width=2),
+        hovertemplate='Distance: %{x:.0f}m<br>Brake: %{y:.1f}%<extra></extra>'
+    ), row=2, col=1)
+    
+    # Steering
+    fig.add_trace(go.Scatter(
+        x=lap_data['Distance'],
+        y=lap_data['Steering'] * 100,
+        name='Steering',
+        line=dict(color='#4A90E2', width=2),
+        hovertemplate='Distance: %{x:.0f}m<br>Steering: %{y:.1f}%<extra></extra>'
+    ), row=3, col=1)
+    
+    fig.update_layout(
+        **get_plotly_layout(
+            title=f'Driver Input Analysis - Lap {lap}',
+            height=700,
+            showlegend=False
+        )
+    )
+    
+    fig.update_xaxes(title_text='Distance (m)', row=3, col=1)
+    fig.update_yaxes(title_text='%', row=1, col=1)
+    fig.update_yaxes(title_text='%', row=2, col=1)
+    fig.update_yaxes(title_text='%', row=3, col=1)
+    
+    return fig
+
+def create_tire_temp_plot(df, lap):
+    """Create tire temperature visualization"""
+    lap_data = df[df['Lap'] == lap]
+    
+    fig = go.Figure()
+    
+    tires = [
+        ('Front Left', 'TireFL', '#FF6B8A'),
+        ('Front Right', 'TireFR', '#FF9BB5'),
+        ('Rear Left', 'TireRL', '#A01C3A'),
+        ('Rear Right', 'TireRR', '#8B1538')
+    ]
+    
+    for name, col, color in tires:
+        fig.add_trace(go.Scatter(
+            x=lap_data['Distance'],
+            y=lap_data[col],
+            name=name,
+            mode='lines',
+            line=dict(color=color, width=2),
+            hovertemplate=f'{name}<br>Distance: %{{x:.0f}}m<br>Temp: %{{y:.1f}}°C<extra></extra>'
+        ))
+    
+    # Add optimal temperature range
+    fig.add_hrect(y0=85, y1=95, fillcolor='rgba(80, 200, 120, 0.1)', 
+                  line_width=0, annotation_text="Optimal Range", 
+                  annotation_position="right")
+    
+    fig.update_layout(
+        **get_plotly_layout(
+            title=f'Tire Temperature Analysis - Lap {lap}',
+            xaxis_title='Distance (m)',
+            yaxis_title='Temperature (°C)',
+            hovermode='x unified',
+            height=500
+        )
+    )
+    
+    return fig
+
+def create_gear_usage_plot(df, selected_laps):
+    """Create gear usage comparison"""
+    gear_data = []
+    
+    for lap in selected_laps:
+        lap_df = df[df['Lap'] == lap]
+        for gear in range(1, 7):
+            time_in_gear = len(lap_df[lap_df['Gear'] == gear]) / len(lap_df) * 100
+            gear_data.append({'Lap': f'Lap {lap}', 'Gear': f'Gear {gear}', 'Percentage': time_in_gear})
+    
+    gear_df = pd.DataFrame(gear_data)
+    
+    fig = px.bar(gear_df, x='Lap', y='Percentage', color='Gear',
+                 title='Gear Usage Distribution',
+                 labels={'Percentage': 'Time in Gear (%)'},
+                 color_discrete_sequence=['#8B1538', '#A01C3A', '#FF6B8A', '#FF9BB5', '#4A90E2', '#50C878'])
+    
+    fig.update_layout(
+        **get_plotly_layout(
+            title='Gear Usage Distribution',
+            height=500,
+            barmode='stack'
+        )
+    )
+    
+    return fig
+
+def create_speed_heatmap(df, lap):
+    """Create track position speed heatmap"""
+    lap_data = df[df['Lap'] == lap]
+    
+    # Simulate X, Y coordinates based on distance
+    angle = lap_data['Distance'] / 5000 * 2 * np.pi * 3  # 3 loops
+    x = np.cos(angle) * (1000 + lap_data['Distance'] / 50)
+    y = np.sin(angle) * (1000 + lap_data['Distance'] / 50)
+    
+    fig = go.Figure(data=go.Scatter(
+        x=x,
+        y=y,
+        mode='markers',
+        marker=dict(
+            size=8,
+            color=lap_data['Speed'],
+            colorscale=[[0, '#8B1538'], [0.5, '#FFD700'], [1, '#50C878']],
+            showscale=True,
+            colorbar=dict(
+                title=dict(text='Speed<br>(km/h)', side='right'),
+                len=0.7,
+                thickness=15
+            )
+        ),
+        text=lap_data['Speed'],
+        hovertemplate='Speed: %{text:.1f} km/h<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        **get_plotly_layout(
+            title=f'Track Speed Heatmap - Lap {lap}',
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
+            height=600,
+            width=600
+        )
+    )
+    
+    return fig
+
+def create_rpm_power_plot(df, lap):
+    """Create RPM and speed correlation plot"""
+    lap_data = df[df['Lap'] == lap]
+    
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    fig.add_trace(go.Scatter(
+        x=lap_data['Distance'],
+        y=lap_data['RPM'],
+        name='RPM',
+        line=dict(color='#A01C3A', width=2),
+        hovertemplate='Distance: %{x:.0f}m<br>RPM: %{y:.0f}<extra></extra>'
+    ), secondary_y=False)
+    
+    fig.add_trace(go.Scatter(
+        x=lap_data['Distance'],
+        y=lap_data['Speed'],
+        name='Speed',
+        line=dict(color='#4A90E2', width=2),
+        hovertemplate='Distance: %{x:.0f}m<br>Speed: %{y:.1f} km/h<extra></extra>'
+    ), secondary_y=True)
+    
+    fig.update_layout(
+        **get_plotly_layout(
+            title=f'RPM & Speed Profile - Lap {lap}',
+            hovermode='x unified',
+            height=500
+        )
+    )
+    
+    fig.update_xaxes(title_text='Distance (m)')
+    fig.update_yaxes(title_text='RPM', secondary_y=False, color='#A01C3A')
+    fig.update_yaxes(title_text='Speed (km/h)', secondary_y=True, color='#4A90E2')
+    
+    return fig
+
+def calculate_performance_metrics(df, lap):
+    """Calculate key performance metrics for a lap"""
+    lap_data = df[df['Lap'] == lap]
+    
+    metrics = {
+        'lap_time': lap_data['LapTime'].iloc[0],
+        'avg_speed': lap_data['Speed'].mean(),
+        'max_speed': lap_data['Speed'].max(),
+        'min_speed': lap_data['Speed'].min(),
+        'avg_throttle': lap_data['Throttle'].mean() * 100,
+        'avg_brake': lap_data['Brake'].mean() * 100,
+        'max_rpm': lap_data['RPM'].max(),
+        'avg_tire_temp': (lap_data['TireFL'].mean() + lap_data['TireFR'].mean() + 
+                         lap_data['TireRL'].mean() + lap_data['TireRR'].mean()) / 4
+    }
+    
+    return metrics
+
+# Main app
+def main():
+    # Header
+    st.markdown("""
+        <h1 style='text-align: center; font-size: 3rem; margin-bottom: 0;'>
+            🏎️ AC TELEMETRY PRO
+        </h1>
+        <p style='text-align: center; color: #B0B0B0; font-size: 1.1rem; margin-top: 0; letter-spacing: 3px;'>
+            ASSETTO CORSA TELEMETRY ANALYSIS SUITE
+        </p>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar
+    with st.sidebar:
+        st.markdown("## ⚙️ DATA SOURCE")
+        
+        use_sample = st.checkbox("Use Sample Data", value=True, 
+                                help="Toggle to use demo data or upload your own")
+        
+        uploaded_file = None
+        if not use_sample:
+            uploaded_file = st.file_uploader(
+                "Upload Telemetry Data",
+                type=['csv', 'xlsx', 'xls'],
+                help="Upload CSV or Excel file with telemetry data"
+            )
+        
+        st.markdown("---")
+        st.markdown("## 📊 EXPECTED FORMAT")
+        st.info("""
+        **Required Columns:**
+        - Lap (int)
+        - Distance (m)
+        - Speed (km/h)
+        
+        **Optional Columns:**
+        - Time, Throttle, Brake, Steering
+        - Gear, RPM
+        - TireFL, TireFR, TireRL, TireRR
+        """)
+        
+        st.markdown("---")
+        st.markdown("## 📖 FEATURES")
+        st.markdown("""
+        - **Speed Trace Analysis**
+        - **Driver Input Telemetry**
+        - **Tire Temperature**
+        - **Gear Usage Statistics**
+        - **Track Speed Heatmap**
+        - **RPM/Power Analysis**
+        - **Performance Metrics**
+        - **Multi-Lap Comparison**
+        """)
+    
+    # Load data
+    if use_sample or uploaded_file is None:
+        df = generate_sample_data(5)
+        if use_sample:
+            st.info("📊 Using sample telemetry data. Toggle 'Use Sample Data' to upload your own.")
+    else:
+        df = load_telemetry_data(uploaded_file)
+        if df is None:
+            st.stop()
+    
+    if df is None or len(df) == 0:
+        st.error("No data available. Please upload a valid telemetry file.")
+        st.stop()
+    
+    # Session Overview
+    st.markdown("## 🎯 SESSION OVERVIEW")
+    
+    # Get unique laps
+    available_laps = sorted(df['Lap'].unique())
+    
+    # Performance metrics for all laps
+    cols = st.columns(4)
+    
+    best_lap = df.groupby('Lap')['LapTime'].first().idxmin()
+    best_time = df[df['Lap'] == best_lap]['LapTime'].iloc[0]
+    
+    with cols[0]:
+        st.markdown(f"""
+        <div class='stat-card'>
+            <div class='stat-value'>{len(available_laps)}</div>
+            <div class='stat-label'>Total Laps</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with cols[1]:
+        st.markdown(f"""
+        <div class='stat-card'>
+            <div class='stat-value'>{best_time:.3f}s</div>
+            <div class='stat-label'>Best Lap Time</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with cols[2]:
+        avg_speed = df['Speed'].mean()
+        st.markdown(f"""
+        <div class='stat-card'>
+            <div class='stat-value'>{avg_speed:.1f}</div>
+            <div class='stat-label'>Avg Speed (km/h)</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with cols[3]:
+        max_speed = df['Speed'].max()
+        st.markdown(f"""
+        <div class='stat-card'>
+            <div class='stat-value'>{max_speed:.1f}</div>
+            <div class='stat-label'>Max Speed (km/h)</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Analysis Tabs
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🏁 SPEED TRACE", 
+        "🎮 DRIVER INPUTS", 
+        "🔥 TIRE TEMPS", 
+        "⚙️ GEAR USAGE",
+        "🗺️ TRACK MAP",
+        "📈 RPM ANALYSIS"
+    ])
+    
+    # Tab 1: Speed Trace
+    with tab1:
+        st.markdown("### Speed Trace Comparison")
+        st.markdown("Compare speed profiles across multiple laps to identify braking points and acceleration zones.")
+        
+        selected_laps = st.multiselect(
+            "Select Laps to Compare",
+            available_laps,
+            default=available_laps[:3] if len(available_laps) >= 3 else available_laps,
+            key='speed_trace_laps'
+        )
+        
+        if selected_laps:
+            fig = create_speed_trace(df, selected_laps)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Lap time comparison table
+            st.markdown("#### Lap Time Comparison")
+            lap_times = df[df['Lap'].isin(selected_laps)].groupby('Lap')['LapTime'].first().reset_index()
+            lap_times['Delta'] = lap_times['LapTime'] - lap_times['LapTime'].min()
+            lap_times.columns = ['Lap', 'Lap Time (s)', 'Delta (s)']
+            st.dataframe(lap_times, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Please select at least one lap to display.")
+    
+    # Tab 2: Driver Inputs
+    with tab2:
+        st.markdown("### Driver Input Telemetry")
+        st.markdown("Analyze throttle, brake, and steering inputs to refine driving technique.")
+        
+        input_lap = st.selectbox("Select Lap", available_laps, key='input_lap')
+        
+        if 'Throttle' in df.columns and 'Brake' in df.columns:
+            fig = create_input_analysis(df, input_lap)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Input statistics
+            lap_data = df[df['Lap'] == input_lap]
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                avg_throttle = lap_data['Throttle'].mean() * 100
+                st.metric("Avg Throttle", f"{avg_throttle:.1f}%")
+            
+            with col2:
+                avg_brake = lap_data['Brake'].mean() * 100
+                st.metric("Avg Brake", f"{avg_brake:.1f}%")
+            
+            with col3:
+                if 'Steering' in df.columns:
+                    max_steering = lap_data['Steering'].abs().max() * 100
+                    st.metric("Max Steering", f"{max_steering:.1f}%")
+        else:
+            st.warning("Throttle and Brake data not available in the dataset.")
+    
+    # Tab 3: Tire Temperatures
+    with tab3:
+        st.markdown("### Tire Temperature Analysis")
+        st.markdown("Monitor tire temperatures to optimize pressure and driving style.")
+        
+        tire_lap = st.selectbox("Select Lap", available_laps, key='tire_lap')
+        
+        if all(col in df.columns for col in ['TireFL', 'TireFR', 'TireRL', 'TireRR']):
+            fig = create_tire_temp_plot(df, tire_lap)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Tire statistics
+            lap_data = df[df['Lap'] == tire_lap]
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Front Left", f"{lap_data['TireFL'].mean():.1f}°C")
+            with col2:
+                st.metric("Front Right", f"{lap_data['TireFR'].mean():.1f}°C")
+            with col3:
+                st.metric("Rear Left", f"{lap_data['TireRL'].mean():.1f}°C")
+            with col4:
+                st.metric("Rear Right", f"{lap_data['TireRR'].mean():.1f}°C")
+            
+            st.info("💡 **Optimal tire temperature range: 85-95°C**")
+        else:
+            st.warning("Tire temperature data not available in the dataset.")
+    
+    # Tab 4: Gear Usage
+    with tab4:
+        st.markdown("### Gear Usage Analysis")
+        st.markdown("Understand gear selection patterns and optimize shift points.")
+        
+        gear_laps = st.multiselect(
+            "Select Laps to Compare",
+            available_laps,
+            default=available_laps[:3] if len(available_laps) >= 3 else available_laps,
+            key='gear_laps'
+        )
+        
+        if gear_laps and 'Gear' in df.columns:
+            fig = create_gear_usage_plot(df, gear_laps)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Please select laps or gear data not available.")
+    
+    # Tab 5: Track Map
+    with tab5:
+        st.markdown("### Track Speed Heatmap")
+        st.markdown("Visualize speed distribution across the track layout.")
+        
+        map_lap = st.selectbox("Select Lap", available_laps, key='map_lap')
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            fig = create_speed_heatmap(df, map_lap)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("#### Track Sectors")
+            st.info("Track divided into sectors based on distance")
+            
+            # Calculate sector times
+            lap_data = df[df['Lap'] == map_lap]
+            total_distance = lap_data['Distance'].max()
+            
+            sectors = [
+                (0, total_distance/3, "Sector 1"),
+                (total_distance/3, 2*total_distance/3, "Sector 2"),
+                (2*total_distance/3, total_distance, "Sector 3")
+            ]
+            
+            for start, end, name in sectors:
+                sector_data = lap_data[(lap_data['Distance'] >= start) & (lap_data['Distance'] < end)]
+                avg_speed = sector_data['Speed'].mean()
+                st.metric(name, f"{avg_speed:.1f} km/h")
+    
+    # Tab 6: RPM Analysis
+    with tab6:
+        st.markdown("### RPM & Speed Profile")
+        st.markdown("Analyze engine RPM and speed correlation for optimal power delivery.")
+        
+        rpm_lap = st.selectbox("Select Lap", available_laps, key='rpm_lap')
+        
+        if 'RPM' in df.columns:
+            fig = create_rpm_power_plot(df, rpm_lap)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # RPM statistics
+            lap_data = df[df['Lap'] == rpm_lap]
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Max RPM", f"{lap_data['RPM'].max():.0f}")
+            with col2:
+                st.metric("Avg RPM", f"{lap_data['RPM'].mean():.0f}")
+            with col3:
+                st.metric("Min RPM", f"{lap_data['RPM'].min():.0f}")
+        else:
+            st.warning("RPM data not available in the dataset.")
+    
+    # Performance Insights Section
+    st.markdown("---")
+    st.markdown("## 💡 PERFORMANCE INSIGHTS")
+    
+    insights_lap = st.selectbox("Analyze Lap", available_laps, key='insights_lap')
+    metrics = calculate_performance_metrics(df, insights_lap)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 📊 Lap Statistics")
+        st.metric("Lap Time", f"{metrics['lap_time']:.3f} s")
+        st.metric("Average Speed", f"{metrics['avg_speed']:.1f} km/h")
+        st.metric("Maximum Speed", f"{metrics['max_speed']:.1f} km/h")
+        st.metric("Minimum Speed", f"{metrics['min_speed']:.1f} km/h")
+    
+    with col2:
+        st.markdown("### 🎯 Driver Inputs")
+        st.metric("Avg Throttle", f"{metrics['avg_throttle']:.1f}%")
+        st.metric("Avg Brake", f"{metrics['avg_brake']:.1f}%")
+        if 'RPM' in df.columns:
+            st.metric("Max RPM", f"{metrics['max_rpm']:.0f}")
+        if all(col in df.columns for col in ['TireFL', 'TireFR', 'TireRL', 'TireRR']):
+            st.metric("Avg Tire Temp", f"{metrics['avg_tire_temp']:.1f}°C")
+    
+    # AI-style insights
+    st.markdown("### 🤖 Key Insights")
+    
+    delta_to_best = metrics['lap_time'] - best_time
+    
+    if delta_to_best < 0.1:
+        st.success(f"🏆 **Excellent!** This is your best lap with a time of {metrics['lap_time']:.3f}s")
+    elif delta_to_best < 0.5:
+        st.info(f"⚡ **Strong Performance!** Only {delta_to_best:.3f}s off your best lap. Focus on late braking zones.")
+    else:
+        st.warning(f"📈 **Room for Improvement** - {delta_to_best:.3f}s slower than best. Analyze speed trace for opportunities.")
+    
+    if metrics['avg_throttle'] < 60:
+        st.warning("⚠️ Low average throttle application. Consider carrying more speed through corners.")
+    
+    if all(col in df.columns for col in ['TireFL', 'TireFR', 'TireRL', 'TireRR']):
+        if metrics['avg_tire_temp'] < 80:
+            st.warning("🧊 Tire temperatures below optimal range. Push harder or adjust tire pressure.")
+        elif metrics['avg_tire_temp'] > 100:
+            st.warning("🔥 Tire temperatures too high. Risk of excessive wear and reduced grip.")
+        else:
+            st.success("✅ Tire temperatures in optimal range (85-95°C)")
+
+if __name__ == "__main__":
+    main()
