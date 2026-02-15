@@ -316,23 +316,119 @@ def load_telemetry_data(uploaded_file):
     """Load telemetry data from uploaded file"""
     try:
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+            # Try multiple strategies to load CSV
+            df = None
+            errors = []
+            
+            # Strategy 1: Standard CSV read
+            try:
+                uploaded_file.seek(0)
+                df = pd.read_csv(uploaded_file)
+            except Exception as e1:
+                errors.append(f"Standard CSV: {str(e1)}")
+                
+                # Strategy 2: Try with different delimiter
+                try:
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, sep=None, engine='python')
+                except Exception as e2:
+                    errors.append(f"Auto-delimiter: {str(e2)}")
+                    
+                    # Strategy 3: Try semicolon delimiter
+                    try:
+                        uploaded_file.seek(0)
+                        df = pd.read_csv(uploaded_file, sep=';')
+                    except Exception as e3:
+                        errors.append(f"Semicolon delimiter: {str(e3)}")
+                        
+                        # Strategy 4: Try tab delimiter
+                        try:
+                            uploaded_file.seek(0)
+                            df = pd.read_csv(uploaded_file, sep='\t')
+                        except Exception as e4:
+                            errors.append(f"Tab delimiter: {str(e4)}")
+                            
+                            # Strategy 5: Skip bad lines
+                            try:
+                                uploaded_file.seek(0)
+                                df = pd.read_csv(uploaded_file, on_bad_lines='skip')
+                                st.warning("⚠️ Some lines in the CSV were skipped due to formatting issues.")
+                            except Exception as e5:
+                                errors.append(f"Skip bad lines: {str(e5)}")
+            
+            if df is None:
+                st.error("❌ Could not parse CSV file. Errors encountered:")
+                for i, err in enumerate(errors, 1):
+                    st.text(f"{i}. {err}")
+                st.info("💡 **Tip:** Ensure your CSV has:\n- A header row with column names\n- Consistent number of columns in each row\n- Proper comma separation")
+                return None
+                
         elif uploaded_file.name.endswith(('.xls', '.xlsx')):
-            df = pd.read_excel(uploaded_file)
+            try:
+                df = pd.read_excel(uploaded_file)
+            except Exception as e:
+                st.error(f"Error reading Excel file: {str(e)}")
+                return None
         else:
             st.error("Unsupported file format. Please upload CSV or Excel files.")
             return None
         
+        # Clean column names (remove whitespace)
+        df.columns = df.columns.str.strip()
+        
+        # Display info about loaded data
+        st.success(f"✅ File loaded successfully! Found {len(df)} data points across {df['Lap'].nunique() if 'Lap' in df.columns else '?'} laps")
+        st.info(f"📋 Columns detected: {', '.join(df.columns.tolist())}")
+        
         # Validate required columns
         required_cols = ['Lap', 'Distance', 'Speed']
-        if not all(col in df.columns for col in required_cols):
-            st.warning(f"File missing required columns: {required_cols}. Using sample data.")
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            st.warning(f"⚠️ File missing required columns: {missing_cols}")
+            
+            # Try to map similar column names
+            column_mapping = {}
+            for req_col in missing_cols:
+                # Look for similar column names (case-insensitive)
+                for col in df.columns:
+                    if req_col.lower() in col.lower():
+                        column_mapping[col] = req_col
+                        st.info(f"🔄 Mapping '{col}' → '{req_col}'")
+                        break
+            
+            if column_mapping:
+                df = df.rename(columns=column_mapping)
+                missing_cols = [col for col in required_cols if col not in df.columns]
+            
+            if missing_cols:
+                st.error(f"❌ Still missing required columns: {missing_cols}. Using sample data instead.")
+                st.info("💡 **Required columns:** Lap (int), Distance (m), Speed (km/h)")
+                return generate_sample_data()
+        
+        # Convert columns to appropriate types
+        try:
+            df['Lap'] = pd.to_numeric(df['Lap'], errors='coerce').astype('Int64')
+            df['Distance'] = pd.to_numeric(df['Distance'], errors='coerce')
+            df['Speed'] = pd.to_numeric(df['Speed'], errors='coerce')
+            
+            # Remove rows with NaN in required columns
+            df = df.dropna(subset=['Lap', 'Distance', 'Speed'])
+            
+            if len(df) == 0:
+                st.error("No valid data rows found after cleaning. Using sample data.")
+                return generate_sample_data()
+                
+        except Exception as e:
+            st.error(f"Error converting data types: {str(e)}. Using sample data.")
             return generate_sample_data()
         
         return df
+        
     except Exception as e:
-        st.error(f"Error loading file: {str(e)}")
-        return None
+        st.error(f"❌ Unexpected error loading file: {str(e)}")
+        st.info("Using sample data instead.")
+        return generate_sample_data()
 
 def create_speed_trace(df, selected_laps):
     """Create speed trace comparison plot"""
@@ -605,18 +701,45 @@ def main():
             )
         
         st.markdown("---")
-        st.markdown("## 📊 EXPECTED FORMAT")
+        st.markdown("## 📊 FILE FORMAT")
         st.info("""
         **Required Columns:**
-        - Lap (int)
-        - Distance (m)
-        - Speed (km/h)
+        - `Lap` (int): Lap number
+        - `Distance` (m): Distance from start
+        - `Speed` (km/h): Vehicle speed
         
         **Optional Columns:**
-        - Time, Throttle, Brake, Steering
-        - Gear, RPM
-        - TireFL, TireFR, TireRL, TireRR
+        - `Time`, `Throttle`, `Brake`, `Steering`
+        - `Gear`, `RPM`
+        - `TireFL`, `TireFR`, `TireRL`, `TireRR`
+        
+        **Supported Formats:**
+        - CSV (comma, semicolon, or tab separated)
+        - Excel (.xlsx, .xls)
+        
+        **Tips:**
+        - First row should be headers
+        - Use consistent delimiters
+        - Avoid special characters in column names
         """)
+        
+        # Download template button
+        if st.button("📥 Download CSV Template"):
+            template_df = generate_sample_data(2)
+            csv_template = template_df.to_csv(index=False)
+            st.download_button(
+                label="💾 Save Template",
+                data=csv_template,
+                file_name="telemetry_template.csv",
+                mime="text/csv",
+                help="Download a sample CSV with correct formatting"
+            )
+        
+        if uploaded_file is not None:
+            st.markdown("---")
+            st.markdown("## 📄 UPLOADED FILE")
+            st.text(f"Name: {uploaded_file.name}")
+            st.text(f"Size: {uploaded_file.size / 1024:.1f} KB")
         
         st.markdown("---")
         st.markdown("## 📖 FEATURES")
@@ -644,6 +767,22 @@ def main():
     if df is None or len(df) == 0:
         st.error("No data available. Please upload a valid telemetry file.")
         st.stop()
+    
+    # Show data preview option
+    with st.expander("🔍 Preview Data", expanded=False):
+        st.markdown("### First 10 rows of loaded data:")
+        st.dataframe(df.head(10), use_container_width=True)
+        
+        st.markdown("### Data Summary:")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Rows", f"{len(df):,}")
+        with col2:
+            st.metric("Columns", len(df.columns))
+        with col3:
+            st.metric("Unique Laps", df['Lap'].nunique() if 'Lap' in df.columns else 'N/A')
+    
+    st.markdown("---")
     
     # Session Overview
     st.markdown("## 🎯 SESSION OVERVIEW")
