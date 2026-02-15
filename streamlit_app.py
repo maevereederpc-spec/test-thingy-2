@@ -371,11 +371,12 @@ def calculate_lap_times(df):
     return lap_times
 
 def format_lap_time(seconds):
-    """Format lap time in seconds to minutes with 2 decimal places"""
+    """Format lap time in seconds to MM:SS.ss format"""
     if seconds <= 0:
         return "N/A"
-    minutes = seconds / 60.0
-    return f"{minutes:.2f}m"
+    minutes = int(seconds // 60)
+    remaining_seconds = seconds % 60
+    return f"{minutes}:{remaining_seconds:05.2f}"
 
 def parse_pytelemetry_csv(file_content):
     """Parse pyTelemetry/Telemetrick CSV format"""
@@ -797,21 +798,74 @@ def create_gear_usage_plot(df, selected_laps):
     
     return fig
 
+def reconstruct_track_coordinates(lap_data):
+    """Reconstruct X,Y track coordinates from telemetry data"""
+    try:
+        # Start at origin
+        x = [0]
+        y = [0]
+        heading = 0  # Initial heading (radians)
+        
+        # Get data
+        distances = lap_data['Distance'].values
+        speeds = lap_data['Speed'].values
+        
+        # Use steering if available, otherwise estimate from speed changes
+        if 'Steering' in lap_data.columns:
+            steering = lap_data['Steering'].values
+        else:
+            # Estimate steering from speed changes (corners = speed drops)
+            steering = np.zeros(len(distances))
+        
+        # Process each point
+        for i in range(1, len(distances)):
+            # Distance traveled since last point
+            ds = distances[i] - distances[i-1]
+            
+            if ds <= 0:  # Skip if distance decreased (shouldn't happen with sorted data)
+                ds = 0.1
+            
+            # Steering angle affects heading change
+            # Scale steering to reasonable turning rate
+            if 'Steering' in lap_data.columns:
+                heading_change = steering[i] * 0.01  # Tune this factor
+            else:
+                # Estimate from speed change
+                speed_change = speeds[i] - speeds[i-1]
+                heading_change = -speed_change * 0.002  # Slower = turning
+            
+            heading += heading_change
+            
+            # Calculate new position
+            dx = ds * np.cos(heading)
+            dy = ds * np.sin(heading)
+            
+            x.append(x[-1] + dx)
+            y.append(y[-1] + dy)
+        
+        return np.array(x), np.array(y)
+    except Exception as e:
+        # Fallback to circular layout if reconstruction fails
+        angle = lap_data['Distance'] / lap_data['Distance'].max() * 2 * np.pi
+        radius = 1000
+        x = radius * np.cos(angle)
+        y = radius * np.sin(angle)
+        return x, y
+
 def create_speed_heatmap(df, lap):
     """Create track position speed heatmap"""
-    lap_data = df[df['Lap'] == lap]
+    lap_data = df[df['Lap'] == lap].copy()
+    lap_data = lap_data.sort_values('Distance')
     
-    # Simulate X, Y coordinates based on distance
-    angle = lap_data['Distance'] / 5000 * 2 * np.pi * 3  # 3 loops
-    x = np.cos(angle) * (1000 + lap_data['Distance'] / 50)
-    y = np.sin(angle) * (1000 + lap_data['Distance'] / 50)
+    # Reconstruct track coordinates
+    x, y = reconstruct_track_coordinates(lap_data)
     
     fig = go.Figure(data=go.Scatter(
         x=x,
         y=y,
-        mode='markers',
+        mode='markers+lines',
         marker=dict(
-            size=8,
+            size=6,
             color=lap_data['Speed'],
             colorscale=[[0, '#8B1538'], [0.5, '#FFD700'], [1, '#50C878']],
             showscale=True,
@@ -819,21 +873,109 @@ def create_speed_heatmap(df, lap):
                 title=dict(text='Speed<br>(km/h)', side='right'),
                 len=0.7,
                 thickness=15
-            )
+            ),
+            line=dict(width=0.5, color='rgba(255,255,255,0.2)')
         ),
+        line=dict(color='rgba(139, 21, 56, 0.3)', width=1),
         text=lap_data['Speed'],
-        hovertemplate='Speed: %{text:.1f} km/h<extra></extra>'
+        hovertemplate='Speed: %{text:.1f} km/h<extra></extra>',
+        showlegend=False
     ))
     
     fig.update_layout(
         **get_plotly_layout(
             title=f'Track Speed Heatmap - Lap {lap}',
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title='', scaleanchor='x', scaleratio=1),
             height=600,
             width=600
         )
     )
+    
+    return fig
+
+def create_lap_comparison(df, lap1, lap2):
+    """Create comprehensive lap comparison with speed, throttle, and brake"""
+    lap1_data = df[df['Lap'] == lap1].copy().sort_values('Distance')
+    lap2_data = df[df['Lap'] == lap2].copy().sort_values('Distance')
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=3, cols=1,
+        subplot_titles=('Speed Comparison', 'Throttle Comparison', 'Brake Comparison'),
+        vertical_spacing=0.08,
+        shared_xaxes=True
+    )
+    
+    # Speed comparison
+    fig.add_trace(go.Scatter(
+        x=lap1_data['Distance'],
+        y=lap1_data['Speed'],
+        name=f'Lap {lap1}',
+        line=dict(color='#8B1538', width=2),
+        hovertemplate='Lap ' + str(lap1) + '<br>Distance: %{x:.0f}m<br>Speed: %{y:.1f} km/h<extra></extra>'
+    ), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(
+        x=lap2_data['Distance'],
+        y=lap2_data['Speed'],
+        name=f'Lap {lap2}',
+        line=dict(color='#4A90E2', width=2),
+        hovertemplate='Lap ' + str(lap2) + '<br>Distance: %{x:.0f}m<br>Speed: %{y:.1f} km/h<extra></extra>'
+    ), row=1, col=1)
+    
+    # Throttle comparison (if available)
+    if 'Throttle' in lap1_data.columns:
+        fig.add_trace(go.Scatter(
+            x=lap1_data['Distance'],
+            y=lap1_data['Throttle'] * 100,
+            name=f'Lap {lap1}',
+            line=dict(color='#8B1538', width=2),
+            showlegend=False,
+            hovertemplate='Lap ' + str(lap1) + '<br>Distance: %{x:.0f}m<br>Throttle: %{y:.1f}%<extra></extra>'
+        ), row=2, col=1)
+        
+        fig.add_trace(go.Scatter(
+            x=lap2_data['Distance'],
+            y=lap2_data['Throttle'] * 100,
+            name=f'Lap {lap2}',
+            line=dict(color='#4A90E2', width=2),
+            showlegend=False,
+            hovertemplate='Lap ' + str(lap2) + '<br>Distance: %{x:.0f}m<br>Throttle: %{y:.1f}%<extra></extra>'
+        ), row=2, col=1)
+    
+    # Brake comparison (if available)
+    if 'Brake' in lap1_data.columns:
+        fig.add_trace(go.Scatter(
+            x=lap1_data['Distance'],
+            y=lap1_data['Brake'] * 100,
+            name=f'Lap {lap1}',
+            line=dict(color='#8B1538', width=2),
+            showlegend=False,
+            hovertemplate='Lap ' + str(lap1) + '<br>Distance: %{x:.0f}m<br>Brake: %{y:.1f}%<extra></extra>'
+        ), row=3, col=1)
+        
+        fig.add_trace(go.Scatter(
+            x=lap2_data['Distance'],
+            y=lap2_data['Brake'] * 100,
+            name=f'Lap {lap2}',
+            line=dict(color='#4A90E2', width=2),
+            showlegend=False,
+            hovertemplate='Lap ' + str(lap2) + '<br>Distance: %{x:.0f}m<br>Brake: %{y:.1f}%<extra></extra>'
+        ), row=3, col=1)
+    
+    fig.update_layout(
+        **get_plotly_layout(
+            title=f'Lap {lap1} vs Lap {lap2} - Comprehensive Comparison',
+            height=900,
+            hovermode='x unified'
+        )
+    )
+    
+    fig.update_xaxes(title_text='Distance (m)', row=3, col=1)
+    fig.update_yaxes(title_text='Speed (km/h)', row=1, col=1)
+    fig.update_yaxes(title_text='Throttle (%)', row=2, col=1, range=[0, 105])
+    fig.update_yaxes(title_text='Brake (%)', row=3, col=1, range=[0, 105])
     
     return fig
 
@@ -1096,8 +1238,9 @@ def main():
     st.markdown("---")
     
     # Analysis Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🏁 SPEED TRACE", 
+        "🔄 LAP COMPARISON",
         "🎮 DRIVER INPUTS", 
         "🔥 TIRE TEMPS", 
         "⚙️ GEAR USAGE",
@@ -1149,8 +1292,37 @@ def main():
         else:
             st.warning("Please select at least one lap to display.")
     
-    # Tab 2: Driver Inputs
+    # Tab 2: Lap Comparison
     with tab2:
+        st.markdown("### Speed, Throttle & Brake Comparison")
+        st.markdown("Compare two laps side-by-side across all key metrics to identify where time is gained or lost.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            lap_comp_1 = st.selectbox("Select First Lap", available_laps, key='lap_comp_1')
+        with col2:
+            lap_comp_2 = st.selectbox("Select Second Lap", available_laps, 
+                                     index=min(1, len(available_laps)-1), key='lap_comp_2')
+        
+        if lap_comp_1 != lap_comp_2:
+            if 'Throttle' in df.columns and 'Brake' in df.columns:
+                fig = create_lap_comparison(df, lap_comp_1, lap_comp_2)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Show lap time difference
+                if lap_comp_1 in lap_times_dict and lap_comp_2 in lap_times_dict:
+                    time_diff = abs(lap_times_dict[lap_comp_1] - lap_times_dict[lap_comp_2])
+                    faster_lap = lap_comp_1 if lap_times_dict[lap_comp_1] < lap_times_dict[lap_comp_2] else lap_comp_2
+                    st.info(f"💡 **Lap {faster_lap}** is {time_diff:.3f}s faster ({format_lap_time(lap_times_dict[faster_lap])} vs {format_lap_time(lap_times_dict[lap_comp_1 if faster_lap == lap_comp_2 else lap_comp_2])})")
+            else:
+                st.warning("Throttle and Brake data not available for comparison. Only showing speed trace.")
+                fig = create_speed_trace(df, [lap_comp_1, lap_comp_2], lap_times_dict)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Please select two different laps to compare.")
+    
+    # Tab 3: Driver Inputs
+    with tab3:
         st.markdown("### Driver Input Telemetry")
         st.markdown("Analyze throttle, brake, and steering inputs to refine driving technique.")
         
@@ -1179,8 +1351,8 @@ def main():
         else:
             st.warning("Throttle and Brake data not available in the dataset.")
     
-    # Tab 3: Tire Temperatures
-    with tab3:
+    # Tab 4: Tire Temperatures
+    with tab4:
         st.markdown("### Tire Temperature Analysis")
         st.markdown("Monitor tire temperatures to optimize pressure and driving style.")
         
@@ -1207,8 +1379,8 @@ def main():
         else:
             st.warning("Tire temperature data not available in the dataset.")
     
-    # Tab 4: Gear Usage
-    with tab4:
+    # Tab 5: Gear Usage
+    with tab5:
         st.markdown("### Gear Usage Analysis")
         st.markdown("Understand gear selection patterns and optimize shift points.")
         
@@ -1225,10 +1397,12 @@ def main():
         else:
             st.warning("Please select laps or gear data not available.")
     
-    # Tab 5: Track Map
-    with tab5:
+    # Tab 6: Track Map
+    with tab6:
         st.markdown("### Track Speed Heatmap")
-        st.markdown("Visualize speed distribution across the track layout.")
+        st.markdown("Visualize speed distribution across the reconstructed track layout.")
+        
+        st.info("💡 **Track Layout**: Reconstructed from telemetry data using distance, speed, and steering inputs. The layout approximates the actual track shape.")
         
         map_lap = st.selectbox("Select Lap", available_laps, key='map_lap')
         
@@ -1257,8 +1431,8 @@ def main():
                 avg_speed = sector_data['Speed'].mean()
                 st.metric(name, f"{avg_speed:.1f} km/h")
     
-    # Tab 6: RPM Analysis
-    with tab6:
+    # Tab 7: RPM Analysis
+    with tab7:
         st.markdown("### RPM & Speed Profile")
         st.markdown("Analyze engine RPM and speed correlation for optimal power delivery.")
         
