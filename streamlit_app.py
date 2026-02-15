@@ -13,7 +13,7 @@ import os
 
 # Page configuration
 st.set_page_config(
-    page_title="AC Telemetry Pro",
+    page_title="Telemetry Analysis",
     page_icon="🏎️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -22,7 +22,7 @@ st.set_page_config(
 # Custom CSS for modern, sleek design with wine red accents
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
     
     /* Main theme */
     :root {
@@ -45,25 +45,25 @@ st.markdown("""
     /* Main container */
     .stApp {
         background: linear-gradient(135deg, #0A0A0A 0%, #1A0A0F 100%);
-        font-family: 'Rajdhani', sans-serif;
+        font-family: 'Inter', sans-serif;
     }
     
     /* Headers */
     h1 {
-        font-family: 'Orbitron', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-weight: 900;
         color: var(--text-primary);
         text-transform: uppercase;
-        letter-spacing: 3px;
+        letter-spacing: 2px;
         margin-bottom: 0.5rem;
         text-shadow: 0 0 20px var(--wine-red-glow);
     }
     
     h2, h3 {
-        font-family: 'Orbitron', sans-serif;
+        font-family: 'Inter', sans-serif;
         color: var(--wine-red-light);
         font-weight: 700;
-        letter-spacing: 2px;
+        letter-spacing: 1px;
         text-transform: uppercase;
         margin-top: 2rem;
     }
@@ -82,14 +82,14 @@ st.markdown("""
     
     /* Metrics */
     [data-testid="stMetricValue"] {
-        font-family: 'Orbitron', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-size: 2rem;
         font-weight: 700;
         color: var(--wine-red-light);
     }
     
     [data-testid="stMetricLabel"] {
-        font-family: 'Rajdhani', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-size: 0.9rem;
         font-weight: 600;
         text-transform: uppercase;
@@ -114,7 +114,7 @@ st.markdown("""
         border: none;
         border-radius: 4px;
         padding: 0.75rem 2rem;
-        font-family: 'Orbitron', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 1px;
@@ -145,7 +145,7 @@ st.markdown("""
     }
     
     .stTabs [data-baseweb="tab"] {
-        font-family: 'Orbitron', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 1px;
@@ -164,7 +164,7 @@ st.markdown("""
     
     /* Selectbox and inputs */
     .stSelectbox, .stMultiSelect {
-        font-family: 'Rajdhani', sans-serif;
+        font-family: 'Inter', sans-serif;
     }
     
     /* Dataframe */
@@ -178,7 +178,7 @@ st.markdown("""
     .stAlert {
         background: var(--card-bg);
         border-left: 4px solid var(--wine-red);
-        font-family: 'Rajdhani', sans-serif;
+        font-family: 'Inter', sans-serif;
     }
     
     /* Custom stat card */
@@ -199,7 +199,7 @@ st.markdown("""
     }
     
     .stat-value {
-        font-family: 'Orbitron', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-size: 2.5rem;
         font-weight: 900;
         color: var(--wine-red-light);
@@ -207,7 +207,7 @@ st.markdown("""
     }
     
     .stat-label {
-        font-family: 'Rajdhani', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-size: 0.9rem;
         font-weight: 600;
         text-transform: uppercase;
@@ -224,7 +224,7 @@ def get_plotly_layout(**kwargs):
     layout = {
         'paper_bgcolor': '#0A0A0A',
         'plot_bgcolor': '#141414',
-        'font': {'color': '#FFFFFF', 'family': 'Rajdhani'},
+        'font': {'color': '#FFFFFF', 'family': 'Inter'},
         'xaxis': {
             'gridcolor': '#2A2A2A',
             'zerolinecolor': '#2A2A2A',
@@ -242,7 +242,7 @@ def get_plotly_layout(**kwargs):
     if 'title' in kwargs:
         layout['title'] = {
             'text': kwargs['title'],
-            'font': {'family': 'Orbitron', 'size': 20, 'color': '#A01C3A'}
+            'font': {'family': 'Inter', 'size': 20, 'color': '#A01C3A'}
         }
         del kwargs['title']
     
@@ -800,17 +800,42 @@ def calculate_performance_metrics(df, lap):
     """Calculate key performance metrics for a lap"""
     lap_data = df[df['Lap'] == lap]
     
+    # Get lap time
+    lap_time = 0.0
+    if 'LapTime' in df.columns:
+        try:
+            lap_time = pd.to_numeric(lap_data['LapTime'].iloc[0], errors='coerce')
+            if pd.isna(lap_time):
+                lap_time = 0.0
+        except:
+            lap_time = 0.0
+    
     metrics = {
-        'lap_time': lap_data['LapTime'].iloc[0],
+        'lap_time': lap_time,
         'avg_speed': lap_data['Speed'].mean(),
         'max_speed': lap_data['Speed'].max(),
         'min_speed': lap_data['Speed'].min(),
-        'avg_throttle': lap_data['Throttle'].mean() * 100,
-        'avg_brake': lap_data['Brake'].mean() * 100,
-        'max_rpm': lap_data['RPM'].max(),
-        'avg_tire_temp': (lap_data['TireFL'].mean() + lap_data['TireFR'].mean() + 
-                         lap_data['TireRL'].mean() + lap_data['TireRR'].mean()) / 4
+        'avg_throttle': 0.0,
+        'avg_brake': 0.0,
+        'max_rpm': 0.0,
+        'avg_tire_temp': 0.0
     }
+    
+    # Add throttle/brake if available
+    if 'Throttle' in lap_data.columns:
+        metrics['avg_throttle'] = lap_data['Throttle'].mean() * 100
+    
+    if 'Brake' in lap_data.columns:
+        metrics['avg_brake'] = lap_data['Brake'].mean() * 100
+    
+    # Add RPM if available
+    if 'RPM' in lap_data.columns:
+        metrics['max_rpm'] = lap_data['RPM'].max()
+    
+    # Add tire temps if available
+    if all(col in lap_data.columns for col in ['TireFL', 'TireFR', 'TireRL', 'TireRR']):
+        metrics['avg_tire_temp'] = (lap_data['TireFL'].mean() + lap_data['TireFR'].mean() + 
+                                    lap_data['TireRL'].mean() + lap_data['TireRR'].mean()) / 4
     
     return metrics
 
@@ -819,10 +844,10 @@ def main():
     # Header
     st.markdown("""
         <h1 style='text-align: center; font-size: 3rem; margin-bottom: 0;'>
-            🏎️ AC TELEMETRY PRO
+            🏎️ TELEMETRY ANALYSIS
         </h1>
         <p style='text-align: center; color: #B0B0B0; font-size: 1.1rem; margin-top: 0; letter-spacing: 3px;'>
-            ASSETTO CORSA TELEMETRY ANALYSIS SUITE
+            RACING DATA VISUALIZATION & INSIGHTS
         </p>
     """, unsafe_allow_html=True)
     
@@ -935,8 +960,35 @@ def main():
     # Performance metrics for all laps
     cols = st.columns(4)
     
-    best_lap = df.groupby('Lap')['LapTime'].first().idxmin()
-    best_time = df[df['Lap'] == best_lap]['LapTime'].iloc[0]
+    # Calculate best lap with proper type handling
+    try:
+        # Ensure LapTime column exists and is numeric
+        if 'LapTime' not in df.columns:
+            # Calculate from Time column if available
+            if 'Time' in df.columns:
+                df['LapTime'] = df.groupby('Lap')['Time'].transform('max')
+        
+        # Convert to numeric, coercing errors
+        df['LapTime'] = pd.to_numeric(df['LapTime'], errors='coerce')
+        
+        # Get lap times for each lap (first value of each lap since it's constant per lap)
+        lap_times = df.groupby('Lap')['LapTime'].first()
+        
+        # Remove any NaN values
+        lap_times = lap_times.dropna()
+        
+        if len(lap_times) > 0:
+            best_lap = lap_times.idxmin()
+            best_time = lap_times.min()
+        else:
+            # Fallback: calculate from distance and speed
+            st.warning("⚠️ Lap times not available, calculating from speed data")
+            best_lap = available_laps[0]
+            best_time = 0.0
+    except Exception as e:
+        st.warning(f"⚠️ Could not calculate best lap time: {str(e)}")
+        best_lap = available_laps[0] if available_laps else 1
+        best_time = 0.0
     
     with cols[0]:
         st.markdown(f"""
@@ -947,12 +999,20 @@ def main():
         """, unsafe_allow_html=True)
     
     with cols[1]:
-        st.markdown(f"""
-        <div class='stat-card'>
-            <div class='stat-value'>{best_time:.3f}s</div>
-            <div class='stat-label'>Best Lap Time</div>
-        </div>
-        """, unsafe_allow_html=True)
+        if best_time > 0:
+            st.markdown(f"""
+            <div class='stat-card'>
+                <div class='stat-value'>{best_time:.3f}s</div>
+                <div class='stat-label'>Best Lap Time</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class='stat-card'>
+                <div class='stat-value'>--:--</div>
+                <div class='stat-label'>Best Lap Time</div>
+            </div>
+            """, unsafe_allow_html=True)
     
     with cols[2]:
         avg_speed = df['Speed'].mean()
@@ -1002,10 +1062,19 @@ def main():
             
             # Lap time comparison table
             st.markdown("#### Lap Time Comparison")
-            lap_times = df[df['Lap'].isin(selected_laps)].groupby('Lap')['LapTime'].first().reset_index()
-            lap_times['Delta'] = lap_times['LapTime'] - lap_times['LapTime'].min()
-            lap_times.columns = ['Lap', 'Lap Time (s)', 'Delta (s)']
-            st.dataframe(lap_times, use_container_width=True, hide_index=True)
+            try:
+                lap_times = df[df['Lap'].isin(selected_laps)].groupby('Lap')['LapTime'].first().reset_index()
+                lap_times['LapTime'] = pd.to_numeric(lap_times['LapTime'], errors='coerce')
+                lap_times = lap_times.dropna()
+                
+                if len(lap_times) > 0:
+                    lap_times['Delta'] = lap_times['LapTime'] - lap_times['LapTime'].min()
+                    lap_times.columns = ['Lap', 'Lap Time (s)', 'Delta (s)']
+                    st.dataframe(lap_times, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Lap time data not available for selected laps")
+            except Exception as e:
+                st.warning(f"Could not generate lap time comparison: {str(e)}")
         else:
             st.warning("Please select at least one lap to display.")
     
@@ -1152,33 +1221,50 @@ def main():
     
     with col1:
         st.markdown("### 📊 Lap Statistics")
-        st.metric("Lap Time", f"{metrics['lap_time']:.3f} s")
+        if metrics['lap_time'] > 0:
+            st.metric("Lap Time", f"{metrics['lap_time']:.3f} s")
+        else:
+            st.metric("Lap Time", "N/A")
         st.metric("Average Speed", f"{metrics['avg_speed']:.1f} km/h")
         st.metric("Maximum Speed", f"{metrics['max_speed']:.1f} km/h")
         st.metric("Minimum Speed", f"{metrics['min_speed']:.1f} km/h")
     
     with col2:
         st.markdown("### 🎯 Driver Inputs")
-        st.metric("Avg Throttle", f"{metrics['avg_throttle']:.1f}%")
-        st.metric("Avg Brake", f"{metrics['avg_brake']:.1f}%")
-        if 'RPM' in df.columns:
+        if metrics['avg_throttle'] > 0:
+            st.metric("Avg Throttle", f"{metrics['avg_throttle']:.1f}%")
+        else:
+            st.metric("Avg Throttle", "N/A")
+        
+        if metrics['avg_brake'] > 0:
+            st.metric("Avg Brake", f"{metrics['avg_brake']:.1f}%")
+        else:
+            st.metric("Avg Brake", "N/A")
+        
+        if 'RPM' in df.columns and metrics['max_rpm'] > 0:
             st.metric("Max RPM", f"{metrics['max_rpm']:.0f}")
-        if all(col in df.columns for col in ['TireFL', 'TireFR', 'TireRL', 'TireRR']):
+        
+        if all(col in df.columns for col in ['TireFL', 'TireFR', 'TireRL', 'TireRR']) and metrics['avg_tire_temp'] > 0:
             st.metric("Avg Tire Temp", f"{metrics['avg_tire_temp']:.1f}°C")
     
     # AI-style insights
     st.markdown("### 🤖 Key Insights")
     
-    delta_to_best = metrics['lap_time'] - best_time
+    try:
+        delta_to_best = metrics['lap_time'] - best_time
+        
+        if abs(delta_to_best) < 0.001:  # Essentially zero
+            st.success(f"🏆 **Excellent!** This is your best lap with a time of {metrics['lap_time']:.3f}s")
+        elif delta_to_best < 0.1:
+            st.success(f"🏆 **Excellent!** Within {delta_to_best:.3f}s of your best lap")
+        elif delta_to_best < 0.5:
+            st.info(f"⚡ **Strong Performance!** Only {delta_to_best:.3f}s off your best lap. Focus on late braking zones.")
+        else:
+            st.warning(f"📈 **Room for Improvement** - {delta_to_best:.3f}s slower than best. Analyze speed trace for opportunities.")
+    except Exception as e:
+        st.info("💡 Compare with other laps to find improvement areas")
     
-    if delta_to_best < 0.1:
-        st.success(f"🏆 **Excellent!** This is your best lap with a time of {metrics['lap_time']:.3f}s")
-    elif delta_to_best < 0.5:
-        st.info(f"⚡ **Strong Performance!** Only {delta_to_best:.3f}s off your best lap. Focus on late braking zones.")
-    else:
-        st.warning(f"📈 **Room for Improvement** - {delta_to_best:.3f}s slower than best. Analyze speed trace for opportunities.")
-    
-    if metrics['avg_throttle'] < 60:
+    if 'Throttle' in df.columns and metrics['avg_throttle'] < 60:
         st.warning("⚠️ Low average throttle application. Consider carrying more speed through corners.")
     
     if all(col in df.columns for col in ['TireFL', 'TireFR', 'TireRL', 'TireRR']):
