@@ -370,6 +370,13 @@ def calculate_lap_times(df):
     
     return lap_times
 
+def format_lap_time(seconds):
+    """Format lap time in seconds to minutes with 2 decimal places"""
+    if seconds <= 0:
+        return "N/A"
+    minutes = seconds / 60.0
+    return f"{minutes:.2f}m"
+
 def parse_pytelemetry_csv(file_content):
     """Parse pyTelemetry/Telemetrick CSV format"""
     lines = file_content.decode('utf-8').split('\n')
@@ -645,7 +652,7 @@ def create_speed_trace(df, selected_laps, lap_times_dict):
         
         # Get lap time for this lap
         lap_time = lap_times_dict.get(lap, 0)
-        lap_time_str = f"{lap_time:.3f}s" if lap_time > 0 else "N/A"
+        lap_time_str = format_lap_time(lap_time)
         
         fig.add_trace(go.Scatter(
             x=lap_data['Distance'],
@@ -1056,7 +1063,7 @@ def main():
         if best_time > 0:
             st.markdown(f"""
             <div class='stat-card'>
-                <div class='stat-value'>{best_time:.3f}s</div>
+                <div class='stat-value'>{format_lap_time(best_time)}</div>
                 <div class='stat-label'>Best Lap Time</div>
             </div>
             """, unsafe_allow_html=True)
@@ -1120,11 +1127,20 @@ def main():
                 lap_time_data = []
                 for lap in selected_laps:
                     if lap in lap_times_dict:
-                        lap_time_data.append({'Lap': lap, 'Lap Time (s)': lap_times_dict[lap]})
+                        lap_time_data.append({
+                            'Lap': lap, 
+                            'Lap Time': format_lap_time(lap_times_dict[lap]),
+                            'Lap Time (s)': lap_times_dict[lap]  # Keep for delta calculation
+                        })
                 
                 if lap_time_data:
                     lap_times_df = pd.DataFrame(lap_time_data)
-                    lap_times_df['Delta (s)'] = lap_times_df['Lap Time (s)'] - lap_times_df['Lap Time (s)'].min()
+                    min_time = lap_times_df['Lap Time (s)'].min()
+                    lap_times_df['Delta'] = lap_times_df['Lap Time (s)'].apply(
+                        lambda x: f"+{(x - min_time):.3f}s" if x > min_time else "Best"
+                    )
+                    # Drop the seconds column, only show formatted time
+                    lap_times_df = lap_times_df[['Lap', 'Lap Time', 'Delta']]
                     st.dataframe(lap_times_df, use_container_width=True, hide_index=True)
                 else:
                     st.info("Lap time data not available for selected laps")
@@ -1277,7 +1293,7 @@ def main():
     with col1:
         st.markdown("### 📊 Lap Statistics")
         if metrics['lap_time'] > 0:
-            st.metric("Lap Time", f"{metrics['lap_time']:.3f} s")
+            st.metric("Lap Time", format_lap_time(metrics['lap_time']))
         else:
             st.metric("Lap Time", "N/A")
         st.metric("Average Speed", f"{metrics['avg_speed']:.1f} km/h")
@@ -1309,13 +1325,13 @@ def main():
         delta_to_best = metrics['lap_time'] - best_time
         
         if abs(delta_to_best) < 0.001:  # Essentially zero
-            st.success(f"🏆 **Excellent!** This is your best lap with a time of {metrics['lap_time']:.3f}s")
+            st.success(f"🏆 **Excellent!** This is your best lap with a time of {format_lap_time(metrics['lap_time'])}")
         elif delta_to_best < 0.1:
-            st.success(f"🏆 **Excellent!** Within {delta_to_best:.3f}s of your best lap")
+            st.success(f"🏆 **Excellent!** Within {delta_to_best:.3f}s of your best lap ({format_lap_time(best_time)})")
         elif delta_to_best < 0.5:
-            st.info(f"⚡ **Strong Performance!** Only {delta_to_best:.3f}s off your best lap. Focus on late braking zones.")
+            st.info(f"⚡ **Strong Performance!** Only {delta_to_best:.3f}s off your best lap ({format_lap_time(best_time)}). Focus on late braking zones.")
         else:
-            st.warning(f"📈 **Room for Improvement** - {delta_to_best:.3f}s slower than best. Analyze speed trace for opportunities.")
+            st.warning(f"📈 **Room for Improvement** - {delta_to_best:.3f}s slower than best ({format_lap_time(best_time)}). Analyze speed trace for opportunities.")
     except Exception as e:
         st.info("💡 Compare with other laps to find improvement areas")
     
