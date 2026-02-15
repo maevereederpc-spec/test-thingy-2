@@ -254,6 +254,7 @@ def get_plotly_layout(**kwargs):
 def generate_sample_data(num_laps=5):
     """Generate sample telemetry data for demonstration"""
     data_frames = []
+    cumulative_time = 0.0
     
     for lap in range(1, num_laps + 1):
         # Generate distance points
@@ -288,11 +289,15 @@ def generate_sample_data(num_laps=5):
         rpm = speed * 50 + gear * 500 + np.random.randn(1000) * 100
         rpm = np.clip(rpm, 1000, 8500)
         
-        # Time
-        time = distance / (speed / 3.6)  # Convert km/h to m/s
-        time = np.cumsum(np.diff(np.concatenate([[0], time])))
+        # Time - make it continuous across laps
+        dt = distance / (speed / 3.6)  # Convert km/h to m/s
+        dt[0] = 0
+        lap_time_increments = np.cumsum(np.diff(np.concatenate([[0], dt])))
+        time = cumulative_time + lap_time_increments
         
-        lap_time = time[-1] + np.random.randn() * 2
+        # Update cumulative time for next lap
+        lap_time = time[-1] - cumulative_time
+        cumulative_time = time[-1]
         
         df = pd.DataFrame({
             'Lap': lap,
@@ -314,6 +319,56 @@ def generate_sample_data(num_laps=5):
         data_frames.append(df)
     
     return pd.concat(data_frames, ignore_index=True)
+
+def calculate_lap_times(df):
+    """Calculate lap times from time differences between lap starts"""
+    lap_times = {}
+    
+    # Check if Time column exists
+    if 'Time' not in df.columns:
+        # Try to fall back to LapTime column
+        if 'LapTime' in df.columns:
+            try:
+                for lap in df['Lap'].unique():
+                    lap_data = df[df['Lap'] == lap]
+                    lap_time = pd.to_numeric(lap_data['LapTime'].iloc[0], errors='coerce')
+                    if not pd.isna(lap_time):
+                        lap_times[lap] = lap_time
+            except:
+                pass
+        return lap_times
+    
+    try:
+        # Get unique laps
+        laps = sorted(df['Lap'].unique())
+        
+        for i, lap in enumerate(laps):
+            # Get the first time value for this lap
+            lap_start_time = df[df['Lap'] == lap]['Time'].min()
+            
+            # If there's a next lap, calculate time difference
+            if i + 1 < len(laps):
+                next_lap = laps[i + 1]
+                next_lap_start_time = df[df['Lap'] == next_lap]['Time'].min()
+                lap_time = next_lap_start_time - lap_start_time
+            else:
+                # For the last lap, use max time - min time of that lap
+                lap_time = df[df['Lap'] == lap]['Time'].max() - lap_start_time
+            
+            lap_times[lap] = lap_time
+    except Exception as e:
+        # Fallback to LapTime column if available
+        if 'LapTime' in df.columns:
+            for lap in df['Lap'].unique():
+                lap_data = df[df['Lap'] == lap]
+                try:
+                    lap_time = pd.to_numeric(lap_data['LapTime'].iloc[0], errors='coerce')
+                    if not pd.isna(lap_time):
+                        lap_times[lap] = lap_time
+                except:
+                    pass
+    
+    return lap_times
 
 def parse_pytelemetry_csv(file_content):
     """Parse pyTelemetry/Telemetrick CSV format"""
@@ -556,6 +611,13 @@ def load_telemetry_data(uploaded_file):
                 st.error("No valid data rows found after cleaning. Using sample data.")
                 return generate_sample_data()
             
+            # Ensure Time column exists for lap time calculation
+            if 'Time' not in df.columns and 'time' in df.columns:
+                df['Time'] = df['time']
+            
+            # Sort by Lap and Distance to ensure proper ordering
+            df = df.sort_values(['Lap', 'Distance']).reset_index(drop=True)
+            
             # Display success message
             st.success(f"✅ File loaded successfully! Found {len(df):,} data points across {df['Lap'].nunique()} laps")
             st.info(f"📋 Columns detected: {', '.join(df.columns.tolist())}")
@@ -571,16 +633,24 @@ def load_telemetry_data(uploaded_file):
         st.info("Using sample data instead.")
         return generate_sample_data()
 
-def create_speed_trace(df, selected_laps):
+def create_speed_trace(df, selected_laps, lap_times_dict):
     """Create speed trace comparison plot"""
     fig = go.Figure()
     
     for lap in selected_laps:
-        lap_data = df[df['Lap'] == lap]
+        lap_data = df[df['Lap'] == lap].copy()
+        
+        # Sort by distance to ensure proper line drawing
+        lap_data = lap_data.sort_values('Distance')
+        
+        # Get lap time for this lap
+        lap_time = lap_times_dict.get(lap, 0)
+        lap_time_str = f"{lap_time:.3f}s" if lap_time > 0 else "N/A"
+        
         fig.add_trace(go.Scatter(
             x=lap_data['Distance'],
             y=lap_data['Speed'],
-            name=f'Lap {lap} ({lap_data["LapTime"].iloc[0]:.3f}s)',
+            name=f'Lap {lap} ({lap_time_str})',
             mode='lines',
             line=dict(width=2),
             hovertemplate='Distance: %{x:.0f}m<br>Speed: %{y:.1f} km/h<extra></extra>'
@@ -796,19 +866,12 @@ def create_rpm_power_plot(df, lap):
     
     return fig
 
-def calculate_performance_metrics(df, lap):
+def calculate_performance_metrics(df, lap, lap_times_dict):
     """Calculate key performance metrics for a lap"""
     lap_data = df[df['Lap'] == lap]
     
-    # Get lap time
-    lap_time = 0.0
-    if 'LapTime' in df.columns:
-        try:
-            lap_time = pd.to_numeric(lap_data['LapTime'].iloc[0], errors='coerce')
-            if pd.isna(lap_time):
-                lap_time = 0.0
-        except:
-            lap_time = 0.0
+    # Get lap time from calculated lap times
+    lap_time = lap_times_dict.get(lap, 0.0)
     
     metrics = {
         'lap_time': lap_time,
@@ -954,6 +1017,12 @@ def main():
     # Session Overview
     st.markdown("## 🎯 SESSION OVERVIEW")
     
+    # Calculate lap times from time differences
+    lap_times_dict = calculate_lap_times(df)
+    
+    if len(lap_times_dict) == 0:
+        st.warning("⚠️ Could not calculate lap times. Ensure your data has a 'Time' column with elapsed time in seconds.")
+    
     # Get unique laps
     available_laps = sorted(df['Lap'].unique())
     
@@ -962,28 +1031,13 @@ def main():
     
     # Calculate best lap with proper type handling
     try:
-        # Ensure LapTime column exists and is numeric
-        if 'LapTime' not in df.columns:
-            # Calculate from Time column if available
-            if 'Time' in df.columns:
-                df['LapTime'] = df.groupby('Lap')['Time'].transform('max')
-        
-        # Convert to numeric, coercing errors
-        df['LapTime'] = pd.to_numeric(df['LapTime'], errors='coerce')
-        
-        # Get lap times for each lap (first value of each lap since it's constant per lap)
-        lap_times = df.groupby('Lap')['LapTime'].first()
-        
-        # Remove any NaN values
-        lap_times = lap_times.dropna()
-        
-        if len(lap_times) > 0:
-            best_lap = lap_times.idxmin()
-            best_time = lap_times.min()
+        if len(lap_times_dict) > 0:
+            # Find lap with minimum time
+            best_lap = min(lap_times_dict, key=lap_times_dict.get)
+            best_time = lap_times_dict[best_lap]
         else:
-            # Fallback: calculate from distance and speed
-            st.warning("⚠️ Lap times not available, calculating from speed data")
-            best_lap = available_laps[0]
+            st.warning("⚠️ Could not calculate lap times from data")
+            best_lap = available_laps[0] if available_laps else 1
             best_time = 0.0
     except Exception as e:
         st.warning(f"⚠️ Could not calculate best lap time: {str(e)}")
@@ -1057,20 +1111,21 @@ def main():
         )
         
         if selected_laps:
-            fig = create_speed_trace(df, selected_laps)
+            fig = create_speed_trace(df, selected_laps, lap_times_dict)
             st.plotly_chart(fig, use_container_width=True)
             
             # Lap time comparison table
             st.markdown("#### Lap Time Comparison")
             try:
-                lap_times = df[df['Lap'].isin(selected_laps)].groupby('Lap')['LapTime'].first().reset_index()
-                lap_times['LapTime'] = pd.to_numeric(lap_times['LapTime'], errors='coerce')
-                lap_times = lap_times.dropna()
+                lap_time_data = []
+                for lap in selected_laps:
+                    if lap in lap_times_dict:
+                        lap_time_data.append({'Lap': lap, 'Lap Time (s)': lap_times_dict[lap]})
                 
-                if len(lap_times) > 0:
-                    lap_times['Delta'] = lap_times['LapTime'] - lap_times['LapTime'].min()
-                    lap_times.columns = ['Lap', 'Lap Time (s)', 'Delta (s)']
-                    st.dataframe(lap_times, use_container_width=True, hide_index=True)
+                if lap_time_data:
+                    lap_times_df = pd.DataFrame(lap_time_data)
+                    lap_times_df['Delta (s)'] = lap_times_df['Lap Time (s)'] - lap_times_df['Lap Time (s)'].min()
+                    st.dataframe(lap_times_df, use_container_width=True, hide_index=True)
                 else:
                     st.info("Lap time data not available for selected laps")
             except Exception as e:
@@ -1215,7 +1270,7 @@ def main():
     st.markdown("## 💡 PERFORMANCE INSIGHTS")
     
     insights_lap = st.selectbox("Analyze Lap", available_laps, key='insights_lap')
-    metrics = calculate_performance_metrics(df, insights_lap)
+    metrics = calculate_performance_metrics(df, insights_lap, lap_times_dict)
     
     col1, col2 = st.columns(2)
     
