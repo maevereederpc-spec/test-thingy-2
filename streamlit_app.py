@@ -7,6 +7,9 @@ from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime
 import io
+import zipfile
+import tempfile
+import os
 
 # Page configuration
 st.set_page_config(
@@ -312,57 +315,123 @@ def generate_sample_data(num_laps=5):
     
     return pd.concat(data_frames, ignore_index=True)
 
+def parse_pytelemetry_csv(file_content):
+    """Parse pyTelemetry/Telemetrick CSV format"""
+    lines = file_content.decode('utf-8').split('\n')
+    
+    # Extract metadata from first 9 rows
+    metadata = {}
+    for i in range(min(9, len(lines))):
+        if ',' in lines[i]:
+            parts = lines[i].split(',', 1)
+            if len(parts) == 2:
+                key = parts[0].strip()
+                value = parts[1].strip()
+                metadata[key] = value
+    
+    # Find the header row (should be around line 19-20)
+    header_row = None
+    for i, line in enumerate(lines):
+        if 'time,' in line.lower() and 'lap number' in line.lower():
+            header_row = i
+            break
+    
+    if header_row is None:
+        return None, metadata
+    
+    # Read CSV starting from header row
+    csv_content = '\n'.join(lines[header_row:])
+    df = pd.read_csv(io.StringIO(csv_content))
+    
+    return df, metadata
+
 def load_telemetry_data(uploaded_file):
     """Load telemetry data from uploaded file"""
+    metadata = {}
+    
     try:
-        if uploaded_file.name.endswith('.csv'):
-            # Try multiple strategies to load CSV
-            df = None
-            errors = []
-            
-            # Strategy 1: Standard CSV read
-            try:
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file)
-            except Exception as e1:
-                errors.append(f"Standard CSV: {str(e1)}")
+        # Handle ZIP files
+        if uploaded_file.name.endswith('.zip'):
+            with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
+                # Find CSV file in ZIP
+                csv_files = [f for f in zip_ref.namelist() if f.endswith('.csv')]
                 
-                # Strategy 2: Try with different delimiter
+                if not csv_files:
+                    st.error("No CSV file found in ZIP archive.")
+                    return None
+                
+                # Use first CSV file
+                csv_filename = csv_files[0]
+                st.info(f"📦 Extracting: {csv_filename}")
+                
+                with zip_ref.open(csv_filename) as csv_file:
+                    file_content = csv_file.read()
+                    
+                    # Try to parse as pyTelemetry format
+                    df, metadata = parse_pytelemetry_csv(file_content)
+                    
+                    if df is not None:
+                        st.success("✅ Detected pyTelemetry/Telemetrick format!")
+        
+        elif uploaded_file.name.endswith('.csv'):
+            # Read file content
+            file_content = uploaded_file.read()
+            uploaded_file.seek(0)  # Reset for potential re-reading
+            
+            # Check if it's pyTelemetry format
+            first_line = file_content.decode('utf-8').split('\n')[0]
+            if 'AC pyTelemetry CSV' in first_line or 'Format,' in first_line:
+                df, metadata = parse_pytelemetry_csv(file_content)
+                if df is not None:
+                    st.success("✅ Detected pyTelemetry/Telemetrick format!")
+            else:
+                # Try standard CSV formats
+                df = None
+                errors = []
+                
+                # Strategy 1: Standard CSV read
                 try:
                     uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, sep=None, engine='python')
-                except Exception as e2:
-                    errors.append(f"Auto-delimiter: {str(e2)}")
+                    df = pd.read_csv(uploaded_file)
+                except Exception as e1:
+                    errors.append(f"Standard CSV: {str(e1)}")
                     
-                    # Strategy 3: Try semicolon delimiter
+                    # Strategy 2: Try with different delimiter
                     try:
                         uploaded_file.seek(0)
-                        df = pd.read_csv(uploaded_file, sep=';')
-                    except Exception as e3:
-                        errors.append(f"Semicolon delimiter: {str(e3)}")
+                        df = pd.read_csv(uploaded_file, sep=None, engine='python')
+                    except Exception as e2:
+                        errors.append(f"Auto-delimiter: {str(e2)}")
                         
-                        # Strategy 4: Try tab delimiter
+                        # Strategy 3: Try semicolon delimiter
                         try:
                             uploaded_file.seek(0)
-                            df = pd.read_csv(uploaded_file, sep='\t')
-                        except Exception as e4:
-                            errors.append(f"Tab delimiter: {str(e4)}")
+                            df = pd.read_csv(uploaded_file, sep=';')
+                        except Exception as e3:
+                            errors.append(f"Semicolon delimiter: {str(e3)}")
                             
-                            # Strategy 5: Skip bad lines
+                            # Strategy 4: Try tab delimiter
                             try:
                                 uploaded_file.seek(0)
-                                df = pd.read_csv(uploaded_file, on_bad_lines='skip')
-                                st.warning("⚠️ Some lines in the CSV were skipped due to formatting issues.")
-                            except Exception as e5:
-                                errors.append(f"Skip bad lines: {str(e5)}")
-            
-            if df is None:
-                st.error("❌ Could not parse CSV file. Errors encountered:")
-                for i, err in enumerate(errors, 1):
-                    st.text(f"{i}. {err}")
-                st.info("💡 **Tip:** Ensure your CSV has:\n- A header row with column names\n- Consistent number of columns in each row\n- Proper comma separation")
-                return None
+                                df = pd.read_csv(uploaded_file, sep='\t')
+                            except Exception as e4:
+                                errors.append(f"Tab delimiter: {str(e4)}")
+                                
+                                # Strategy 5: Skip bad lines
+                                try:
+                                    uploaded_file.seek(0)
+                                    df = pd.read_csv(uploaded_file, on_bad_lines='skip')
+                                    st.warning("⚠️ Some lines in the CSV were skipped due to formatting issues.")
+                                except Exception as e5:
+                                    errors.append(f"Skip bad lines: {str(e5)}")
                 
+                if df is None:
+                    st.error("❌ Could not parse CSV file. Errors encountered:")
+                    for i, err in enumerate(errors, 1):
+                        st.text(f"{i}. {err}")
+                    st.info("💡 **Tip:** Ensure your CSV has:\n- A header row with column names\n- Consistent number of columns in each row\n- Proper comma separation")
+                    return None
+                    
         elif uploaded_file.name.endswith(('.xls', '.xlsx')):
             try:
                 df = pd.read_excel(uploaded_file)
@@ -370,36 +439,73 @@ def load_telemetry_data(uploaded_file):
                 st.error(f"Error reading Excel file: {str(e)}")
                 return None
         else:
-            st.error("Unsupported file format. Please upload CSV or Excel files.")
+            st.error("Unsupported file format. Please upload CSV, Excel, or ZIP files.")
             return None
         
-        # Clean column names (remove whitespace)
+        if df is None:
+            return None
+        
+        # Display metadata if available
+        if metadata:
+            with st.expander("📋 Session Metadata", expanded=False):
+                col1, col2 = st.columns(2)
+                with col1:
+                    if 'Driver' in metadata:
+                        st.info(f"**Driver:** {metadata['Driver']}")
+                    if 'Vehicle' in metadata:
+                        st.info(f"**Vehicle:** {metadata['Vehicle']}")
+                    if 'Venue' in metadata:
+                        st.info(f"**Track:** {metadata['Venue']}")
+                with col2:
+                    if 'Log Date' in metadata:
+                        st.info(f"**Date:** {metadata['Log Date']}")
+                    if 'Log Time' in metadata:
+                        st.info(f"**Time:** {metadata['Log Time']}")
+                    if 'Sample Rate' in metadata:
+                        st.info(f"**Sample Rate:** {metadata['Sample Rate']} Hz")
+        
+        # Clean column names (remove whitespace and normalize)
         df.columns = df.columns.str.strip()
         
-        # Display info about loaded data
-        st.success(f"✅ File loaded successfully! Found {len(df)} data points across {df['Lap'].nunique() if 'Lap' in df.columns else '?'} laps")
-        st.info(f"📋 Columns detected: {', '.join(df.columns.tolist())}")
+        # Map pyTelemetry columns to expected format
+        column_mapping = {
+            'Lap Number': 'Lap',
+            'Lap Distance': 'Distance',
+            'Ground Speed': 'Speed',
+            'Throttle Pos': 'Throttle',
+            'Brake Pos': 'Brake',
+            'Steering Angle': 'Steering',
+            'Engine RPM': 'RPM',
+            'Tire Temp Core FL': 'TireFL',
+            'Tire Temp Core FR': 'TireFR',
+            'Tire Temp Core RL': 'TireRL',
+            'Tire Temp Core RR': 'TireRR',
+            'Lap Time': 'LapTime',
+            'time': 'Time'
+        }
         
-        # Validate required columns
+        # Apply column mapping
+        for old_name, new_name in column_mapping.items():
+            if old_name in df.columns:
+                df = df.rename(columns={old_name: new_name})
+                st.info(f"🔄 Mapped '{old_name}' → '{new_name}'")
+        
+        # Try to map similar column names (case-insensitive)
         required_cols = ['Lap', 'Distance', 'Speed']
         missing_cols = [col for col in required_cols if col not in df.columns]
         
         if missing_cols:
             st.warning(f"⚠️ File missing required columns: {missing_cols}")
             
-            # Try to map similar column names
-            column_mapping = {}
             for req_col in missing_cols:
                 # Look for similar column names (case-insensitive)
                 for col in df.columns:
                     if req_col.lower() in col.lower():
-                        column_mapping[col] = req_col
+                        df = df.rename(columns={col: req_col})
                         st.info(f"🔄 Mapping '{col}' → '{req_col}'")
                         break
             
-            if column_mapping:
-                df = df.rename(columns=column_mapping)
-                missing_cols = [col for col in required_cols if col not in df.columns]
+            missing_cols = [col for col in required_cols if col not in df.columns]
             
             if missing_cols:
                 st.error(f"❌ Still missing required columns: {missing_cols}. Using sample data instead.")
@@ -408,16 +514,51 @@ def load_telemetry_data(uploaded_file):
         
         # Convert columns to appropriate types
         try:
-            df['Lap'] = pd.to_numeric(df['Lap'], errors='coerce').astype('Int64')
+            # Clean up Lap column (remove any decimal points)
+            if 'Lap' in df.columns:
+                df['Lap'] = pd.to_numeric(df['Lap'], errors='coerce')
+                df['Lap'] = df['Lap'].ffill().astype('Int64')
+            
             df['Distance'] = pd.to_numeric(df['Distance'], errors='coerce')
             df['Speed'] = pd.to_numeric(df['Speed'], errors='coerce')
             
+            # Convert optional columns
+            optional_conversions = {
+                'Throttle': lambda x: pd.to_numeric(x, errors='coerce') / 100.0,  # Convert from % to 0-1
+                'Brake': lambda x: pd.to_numeric(x, errors='coerce') / 100.0,     # Convert from % to 0-1
+                'Steering': lambda x: pd.to_numeric(x, errors='coerce'),
+                'Gear': lambda x: pd.to_numeric(x, errors='coerce').astype('Int64'),
+                'RPM': lambda x: pd.to_numeric(x, errors='coerce'),
+                'TireFL': lambda x: pd.to_numeric(x, errors='coerce'),
+                'TireFR': lambda x: pd.to_numeric(x, errors='coerce'),
+                'TireRL': lambda x: pd.to_numeric(x, errors='coerce'),
+                'TireRR': lambda x: pd.to_numeric(x, errors='coerce'),
+                'Time': lambda x: pd.to_numeric(x, errors='coerce')
+            }
+            
+            for col, converter in optional_conversions.items():
+                if col in df.columns:
+                    df[col] = converter(df[col])
+            
+            # Calculate lap time if not present
+            if 'LapTime' not in df.columns and 'Time' in df.columns:
+                df['LapTime'] = df.groupby('Lap')['Time'].transform('max')
+            
             # Remove rows with NaN in required columns
+            before_len = len(df)
             df = df.dropna(subset=['Lap', 'Distance', 'Speed'])
+            after_len = len(df)
+            
+            if before_len != after_len:
+                st.warning(f"⚠️ Removed {before_len - after_len} rows with invalid data")
             
             if len(df) == 0:
                 st.error("No valid data rows found after cleaning. Using sample data.")
                 return generate_sample_data()
+            
+            # Display success message
+            st.success(f"✅ File loaded successfully! Found {len(df):,} data points across {df['Lap'].nunique()} laps")
+            st.info(f"📋 Columns detected: {', '.join(df.columns.tolist())}")
                 
         except Exception as e:
             st.error(f"Error converting data types: {str(e)}. Using sample data.")
@@ -696,31 +837,32 @@ def main():
         if not use_sample:
             uploaded_file = st.file_uploader(
                 "Upload Telemetry Data",
-                type=['csv', 'xlsx', 'xls'],
-                help="Upload CSV or Excel file with telemetry data"
+                type=['csv', 'xlsx', 'xls', 'zip'],
+                help="Upload CSV, Excel, or ZIP file with telemetry data (supports pyTelemetry/Telemetrick format)"
             )
         
         st.markdown("---")
         st.markdown("## 📊 FILE FORMAT")
         st.info("""
-        **Required Columns:**
-        - `Lap` (int): Lap number
-        - `Distance` (m): Distance from start
-        - `Speed` (km/h): Vehicle speed
-        
-        **Optional Columns:**
-        - `Time`, `Throttle`, `Brake`, `Steering`
-        - `Gear`, `RPM`
-        - `TireFL`, `TireFR`, `TireRL`, `TireRR`
-        
         **Supported Formats:**
+        - ✅ **pyTelemetry/Telemetrick** (ZIP or CSV)
         - CSV (comma, semicolon, or tab separated)
         - Excel (.xlsx, .xls)
         
-        **Tips:**
-        - First row should be headers
-        - Use consistent delimiters
-        - Avoid special characters in column names
+        **Required Columns:**
+        - `Lap` (or `Lap Number`): Lap number
+        - `Distance` (or `Lap Distance`): Distance from start (m)
+        - `Speed` (or `Ground Speed`): Vehicle speed (km/h)
+        
+        **Optional Columns:**
+        - `Time`, `Throttle Pos`, `Brake Pos`, `Steering Angle`
+        - `Gear`, `Engine RPM`
+        - `Tire Temp Core FL/FR/RL/RR`
+        
+        **pyTelemetry Notes:**
+        - Upload the ZIP file directly
+        - Metadata will be automatically extracted
+        - All columns mapped automatically
         """)
         
         # Download template button
